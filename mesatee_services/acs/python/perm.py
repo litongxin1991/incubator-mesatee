@@ -1,4 +1,3 @@
-from acs_py_enclave import ffi
 ###############################################################################
 # Parser Combinators
 ###############################################################################
@@ -335,20 +334,35 @@ def rep_with_sep(to_rep, sep):
     r = r ** (lambda x: [x[0]] + x[1])
     return r
 
-ALPHA_LOWER = 'abcdefghijklmnopqrstuvwxyz'
-DIGIT = '0123456789'
+ALPHA = set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ')
+DIGIT = set('0123456789')
+ALPHA_DIGIT = ALPHA | DIGIT
 
-Alpha = one_of(map(StrLiteral, ALPHA_LOWER))
+Alpha = one_of(map(StrLiteral, ALPHA))
 Digit = one_of(map(StrLiteral, DIGIT))
 
 Equal, Comma, Dot = [StrLiteral(c).ignore() for c in ['=', ',', '.']]
 Underscore = StrLiteral('_')
 NewLine = (~ StrLiteral('\n')).ignore()
 
-Chars = (~ one_of([Alpha, Underscore,  Digit])) ** join
+def identifier_matcher(text, pos):
+    end = len(text)
+    start = pos
+    if pos >= end:
+        return None
+    first = text[pos]
+    if first != '_' and first not in ALPHA:
+        return None
+    pos += 1
+    while pos < end:
+        char = text[pos]
+        if char == '_' or char in ALPHA_DIGIT:
+            pos += 1
+        else:
+            break
+    return text[start:pos], pos
 
-Identifier = one_of([Alpha, Underscore]) + (~ one_of([Alpha, Underscore,  Digit])) ** join
-Identifier = (Identifier ** flatten) ** join
+Identifier = CustomMatcher(identifier_matcher)
 
 IdTuple = rep_with_sep(Identifier, Comma)
 
@@ -383,18 +397,18 @@ PyExpr = CustomMatcher(pyparser_matcher)
 Matcher = Identifier + Equal + PyExpr + NewLine
 
 RequestDefHeader = StrLiteral('[request_definition]') + NewLine
-RoleDefHeader    = StrLiteral('[role_definition]') + NewLine
+TermDefHeader    = StrLiteral('[term_definition]') + NewLine
 PolicyDefHeader  = StrLiteral('[policy_definition]') + NewLine
 PolicyEftHeader  = StrLiteral('[policy_effect]') + NewLine
 MatchersHeader   = StrLiteral('[matchers]') + NewLine
 
 RequestDefSec = RequestDefHeader.ignore() + ~Definition
-RoleDefSec = RoleDefHeader.ignore() + ~Definition
+TermDefSec = TermDefHeader.ignore() + ~Definition
 PolicyDefSec = PolicyDefHeader.ignore() + ~Definition
 PolicyEftSec = PolicyEftHeader.ignore() + PolicyEft
 MatchersSec = MatchersHeader.ignore() + ~Matcher
 
-ModelDef = (RequestDefSec + PolicyDefSec + RoleDefSec + PolicyEftSec + MatchersSec) ** flatten
+ModelDef = (RequestDefSec + PolicyDefSec + TermDefSec + PolicyEftSec + MatchersSec) ** flatten
 
 def preprocess(conf):
     # process escaped line breaks
@@ -418,7 +432,7 @@ class InvalidModelDefinition(Exception):
     @staticmethod
     def redundant_def(redefined_vars, g1, g2):
         msg_parts = [
-            'multiple definition(s) of term(s)',
+            'multiple definition(s) of identifiers(s)',
             ', '.join(redfined_vars),
             'found in sections',
             g1, g2
@@ -435,7 +449,7 @@ class InvalidModelDefinition(Exception):
         msg = 'matcher(s) defined for unknown request type(s): {}'
         return InvalidModelDefinition(msg.format(', '.join(unknown_requests)))
 
-class Term(object):
+class Policy(object):
     def __init__(self, attrs, vals):
         assert len(attrs) == len(vals)
         self.__named_attrs = attrs
@@ -443,7 +457,7 @@ class Term(object):
             setattr(self, attr, val)
 
     def __repr__(self):
-        parts = ['\nTerm {\n']
+        parts = ['\Policy {\n']
         for attr in self.__named_attrs:
             parts.append('  ')
             parts.append(attr)
@@ -453,18 +467,38 @@ class Term(object):
         parts.append('}\n')
         return ''.join(parts)
 
+class Term(object):
+    def __init__(self, arity, facts = []):
+        self.__arity = arity
+        self.__facts = []
+        self.add_facts(facts)
+
+    def add_facts(self, facts):
+        for fact in facts:
+            self.add_fact(fact)
+
+    def add_fact(self, fact):
+        assert len(fact) == self.__arity
+        if not isinstance(fact, tuple):
+            fact = tuple(fact)
+        self.__facts.append(fact)
+
+    def __call__(self, *args):
+        assert len(args) == self.__arity
+        return any(all(a == b for a, b in zip(fact, args)) for fact in self.__facts)
+
 class Model(object):
-    def __init__(self, raw_model, terms = []):
-        request_def, policy_def, role_def, effect, matchers = raw_model
-        self.request_template = { r[0]:r[1] for r in request_def }
-        self.policy_template = { p[0]:p[1] for p in policy_def }
-        self.role_template = { r[0]:r[1] for r in role_def }
-        self.effect = effect
-        self.matchers = { m[0]:m[1] for m in matchers }
+    def __init__(self, raw_model):
+        request_def, policy_def, term_def, effect, matchers = raw_model
+        self.__request_template = { r[0]:r[1] for r in request_def }
+        self.__policy_template = { p[0]:p[1] for p in policy_def }
+        self.__term_template = { t[0]:len(t[1]) for t in term_def }
+        self.__effect = effect
+        self.__matchers = { m[0]:m[1] for m in matchers }
 
         def_sections = zip(
-            ['request_definition', '[policy_definition]', '[role_definition]'],
-            [self.request_template, self.policy_template, self.role_template],
+            ['request_definition', '[policy_definition]', '[term_definition]'],
+            [self.__request_template, self.__policy_template, self.__term_template],
         )
 
         n_sec = len(def_sections)
@@ -476,102 +510,98 @@ class Model(object):
                         overalp, def_sections[i][0], def_sections[j][0]
                     )
 
-        missing_matchers = set(self.request_template.keys()) - set(self.matchers.keys())
+        missing_matchers = set(self.__request_template.keys()) - set(self.__matchers.keys())
         if missing_matchers:
             raise InvalidModelDefinition.missing_matchers(missing_matchers)
 
-        unknown_requests = set(self.matchers.keys()) - set(self.request_template.keys())
+        unknown_requests = set(self.__matchers.keys()) - set(self.__request_template.keys())
         if unknown_requests:
             raise InvalidModelDefinition.unknown_requests(unknown_requests)
 
-        self.term_to_template = {}
-        self.term_to_template.update(self.policy_template)
-        self.term_to_template.update(self.role_template)
+        self.__policy_knowledge_base = {
+            policy_name:set() for policy_name in self.__policy_template.keys()
+        }
+        self.__term_knowledge_base = {
+            term_name:Term(term_arity) for term_name, term_arity in self.__term_template.items()
+        }
 
-        self.knowledge_base = {term_name:set() for term_name in self.term_to_template.keys()}
+    def add_policies(self, policies):
+        for p in policies:
+            tpl = self.__policy_template[p[0]]
+            self.__policy_knowledge_base[p[0]].add(Policy(tpl, p[1:]))
 
-        self.add_terms(terms)
-
-    def add_terms(self, terms):
-        for t in terms:
-            tpl = self.term_to_template[t[0]]
-            self.knowledge_base[t[0]].add(Term(tpl, t[1:]))
-
-    def add_terms_from_csv_text(self, csv):
-        self.add_terms([
+    def add_policies_from_csv_text(self, csv):
+        self.add_policies([
             [p.strip() for p in line.split(',')] for line in csv.splitlines() if line
         ])
-            
+
+    def add_term_items(self, term_items):
+        for ti in term_items:
+            term = self.__term_knowledge_base[ti[0]]
+            term.add_fact(ti[1:])
+
+    def add_term_items_from_csv_text(self, csv):
+        self.add_term_items([
+            [p.strip() for p in line.split(',')] for line in csv.splitlines() if line
+        ])
+
     def get_matcher_proxy(self, request_type, env):
         def matcher_proxy():
             for k, v in env.items():
                 locals()[k] = v
-            return eval(self.matchers[request_type])
+            return eval(self.__matchers[request_type])
         return matcher_proxy
 
     def enforce(self, request):
         request_type, request_content = request
-        tpl = self.request_template[request_type]
-        request_term = Term(tpl, request_content)
+        tpl = self.__request_template[request_type]
+        request_policy = Policy(tpl, request_content)
 
         has_allow = False
         
-        def decisions(remaining_term_keys, env):
-            if not remaining_term_keys:
+        def decisions(remaining_policy_keys, env):
+            if not remaining_policy_keys:
                 yield self.get_matcher_proxy(request_type, env)()
             else:
-                next_key = remaining_term_keys[0]
-                remaining_term_keys = remaining_term_keys[1:]
-                term_candidates = self.knowledge_base[next_key]
-                for term in term_candidates:
-                    env[next_key] = term
-                    for d in decisions(remaining_term_keys, env):
+                next_key = remaining_policy_keys[0]
+                remaining_policy_keys = remaining_policy_keys[1:]
+                policy_candidates = self.__policy_knowledge_base[next_key]
+                for policy in policy_candidates:
+                    env[next_key] = policy
+                    for d in decisions(remaining_policy_keys, env):
                         yield d
 
-        for decision in decisions(self.knowledge_base.keys(), {request_type: request_term}):
+        enforcer_env = {request_type: request_policy}
+        enforcer_env.update(self.__term_knowledge_base)
+        for decision in decisions(self.__policy_knowledge_base.keys(), enforcer_env):
             if decision is True:
                 return True
         return False
 
-def build_model(conf, csv):
+def build_model(conf, policy_csv, term_csv):
     raw_model = parse_model(conf)
     model = Model(raw_model)
-    model.add_terms_from_csv_text(csv)
+    model.add_policies_from_csv_text(policy_csv)
+    model.add_term_items_from_csv_text(term_csv)
     return model
 
 global_perm_model = None
 
+from acs_py_enclave import ffi
+
 @ffi.def_extern()
-def mesapy_setup_model():
-    conf = """
-# request definition
-[request_definition]
-r = sub, obj, act
-r2 = sub, obj
-
-[policy_definition]
-p = sub, obj, act
-
-[role_definition]
-g = sub, grp
-
-[policy_effect]
-allow-and-deny
-
-[matchers]
-r = (r.sub == p.sub and r.obj == p.obj and r.act == p.act) or (g.sub == r.sub and g.grp == 'admin')
-r2 = r2.sub == r2.obj.Owner
-"""
-    csv = """
+def mesapy_setup_model(conf):
+    policy_csv = """
 p, alice, file1, read
 p, bob, file1, read
 p, alice, file2, write
 p, bob, file1, write
-
+"""
+    term_csv = """
 g, charlie, admin
 """
     global global_perm_model
-    global_perm_model = build_model(conf, csv)
+    global_perm_model = build_model(ffi.string(conf), policy_csv, term_csv)
 
 @ffi.def_extern()
 def mesapy_run_tests():
@@ -591,6 +621,11 @@ def mesapy_run_tests():
     assert model.enforce(['r', ['charlie', 'file2', 'read']]) == True
     assert model.enforce(['r', ['charlie', 'file2', 'write']]) == True
 
+    assert model.enforce(['r', ['david', 'file1', 'read']]) == False
+    assert model.enforce(['r', ['david', 'file1', 'write']]) == False
+    assert model.enforce(['r', ['david', 'file2', 'read']]) == False
+    assert model.enforce(['r', ['david', 'file2', 'write']]) == False
+
     class ABACObj(object):
         def __init__(self, name, owner):
             self.Name = name
@@ -602,4 +637,3 @@ def mesapy_run_tests():
     assert model.enforce(['r2', ['alice', alicedata]]) == True
 
     print 'all access control checks correct!'
-

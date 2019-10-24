@@ -16,6 +16,9 @@
 #[cfg(feature = "mesalock_sgx")]
 use std::prelude::v1::*;
 
+use std::ffi::CString;
+use std::os::raw::c_char;
+
 use mesatee_core::config;
 use mesatee_core::prelude::*;
 use mesatee_core::Result;
@@ -33,7 +36,7 @@ register_ecall_handler!(
 );
 
 extern "C" {
-    fn mesapy_setup_model();
+    fn mesapy_setup_model(model_text: *const c_char);
     fn mesapy_run_tests();
 }
 
@@ -65,10 +68,12 @@ fn handle_serve_connection(args: &ServeConnectionInput) -> Result<ServeConnectio
     };
 
     let _ = server.serve(server_instance);
-    
+
     // We discard all enclave internal errors here.
     Ok(ServeConnectionOutput::default())
 }
+
+const MODEL_TEXT: &'static str = include_str!("../../model.conf");
 
 #[handle_ecall]
 fn handle_init_enclave(_args: &InitEnclaveInput) -> Result<InitEnclaveOutput> {
@@ -82,7 +87,7 @@ fn handle_init_enclave(_args: &InitEnclaveInput) -> Result<InitEnclaveOutput> {
     mesatee_core::rpc::sgx::prelude();
 
     unsafe {
-        mesapy_setup_model();
+        mesapy_setup_model(CString::new(MODEL_TEXT).unwrap().as_ptr());
         mesapy_run_tests();
     }
 
