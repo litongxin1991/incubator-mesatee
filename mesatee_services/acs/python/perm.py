@@ -78,12 +78,12 @@ class Stream(object):
         while match_pos < l and string[match_pos] in self.WHITESPACES:
             match_pos += 1
         if pos < match_pos:
-            return None
+            raise ParsingError(self, 'expecting "{}"'.format(string))
         if match_pos:
             string = string[match_pos:]
         if self.__items.startswith(string, pos):
             return Stream(self.__items, pos + len(string))
-        return None
+        raise ParsingError(self, 'expecting "{}"'.format(string))
 
     def accept_matcher(self, matcher):
         pos = self.__pos
@@ -93,31 +93,32 @@ class Stream(object):
 
         res = matcher(self.__items, pos)
         if res is None:
-            return None
+            raise ParsingError(self, 'matcher for {} failed'.format(matcher.__doc__))
         obj, npos = res
         return obj, Stream(self.__items, npos)
 
     def end(self):
         return self.__pos == len(self.__items)
 
+    def pos(self):
+        return self.__pos
+
     def __repr__(self):
-        line_start = max(0, self.__items.rfind('\n', 0, self.__pos))
+        line_start = self.__items.rfind('\n', 0, self.__pos) + 1
         line_end = self.__items.find('\n', self.__pos)
         if line_end == -1:
             line_end = self.__pos
 
-        parts = []
-
         if line_end - line_start > 80:
             line_start = max(line_start, self.__pos - 40)
             line_end = min(line_start + 80, len(self.__items))
-            
+
         return ''.join([
             self.__items[line_start:line_end],
             '\n',
             ' ' * (self.__pos - line_start),
             '^',
-            ' ' * (line_end - self.__pos - 1),
+            ' ' * (line_end - self.__pos),
             '\nerror at character ',
             str(self.__pos),
         ])
@@ -139,11 +140,6 @@ class State(object):
             return State(self.stream, f(self.payload))
         return self
 
-    def __iter__(self):
-        yield self.success
-        yield self.payload
-        yield self.stream
-
 class ParsingError(Exception):
     def __init__(self, stream, msg = ''):
         super(ParsingError, self).__init__(msg)
@@ -161,13 +157,17 @@ class Parser(object):
 
     def parse_from(self, stream):
         n_state = self(stream)
-        if not n_state or not n_state.stream.end():
-            print n_state.stream
-            raise ParsingError(n_state.stream)
+        if not n_state:
+            print n_state.stream, n_state.payload
+            raise ParsingError(n_state.stream, n_state.payload)
+        elif not n_state.stream.end():
+            print n_state.stream, 'trailing unparsable input'
+            print n_state.stream.pos()
+            raise ParsingError(n_state.stream, 'trailing unparsable input')
         return n_state
 
-    def fail(self, stream):
-        return State(stream, None, False)
+    def fail(self, exception):
+        return State(exception.stream, str(exception), False)
 
     def ignore(self):
         return Ignore(self)
@@ -201,12 +201,15 @@ class StrLiteral(Parser):
 
     def __call__(self, stream):
         if stream.end():
-            return self.fail(stream)
-        n_stream = stream.accept_strlit(self.__string)
-        if n_stream is None:
-            return self.fail(stream)
-        else:
-            return State(n_stream, self.__string)
+            return self.fail(ParsingError(
+                stream, 'insufficient input, expecting {}'.format(self.__string))
+            )
+        try:
+            n_stream = stream.accept_strlit(self.__string)
+        except ParsingError as e:
+            return self.fail(e)
+
+        return State(n_stream, self.__string)
 
 class CustomMatcher(Parser):
     def __init__(self, matcher):
@@ -214,13 +217,13 @@ class CustomMatcher(Parser):
         self.__matcher = matcher
 
     def __call__(self, stream):
-        res = stream.accept_matcher(self.__matcher)
-        if res is None:
-            return self.fail(stream)
-        else:
-            obj, n_stream = res
-            return State(n_stream, obj)
-            
+        try:
+            res = stream.accept_matcher(self.__matcher)
+        except ParsingError as e:
+            return self.fail(e)
+
+        obj, n_stream = res
+        return State(n_stream, obj)
 
 class Concat(Parser):
     def __init__(self, c1, c2):
@@ -232,11 +235,11 @@ class Concat(Parser):
     def __call__(self, stream):
         n_state = self.__first(stream)
         if not n_state:
-            return State(stream, None, False)
+            return n_state
         p1 = n_state.payload
         n_state = self.__second(n_state.stream)
         if not n_state:
-            return State(stream, None, False)
+            return n_state
         p2 = n_state.payload
 
         if isinstance(self.__first, Ignore):
@@ -260,7 +263,7 @@ class Or(Parser):
         n_state = self.__else(stream)
         if n_state:
             return n_state.fmap(lambda x: Right(x))
-        return self.fail(stream)
+        return n_state
 
 class Rep(Parser):
     def __init__(self, c):
@@ -346,6 +349,7 @@ Underscore = StrLiteral('_')
 NewLine = (~ StrLiteral('\n')).ignore()
 
 def identifier_matcher(text, pos):
+    """identifier"""
     end = len(text)
     start = pos
     if pos >= end:
@@ -384,6 +388,7 @@ POLICY_EFFECTS = [
 PolicyEft = one_of(map(StrLiteral, POLICY_EFFECTS)) + NewLine
 
 def pyparser_matcher(text, pos):
+    """syntactically correct python code"""
     line_end = text.find('\n', pos)
     if line_end == -1:
         return None
@@ -600,19 +605,37 @@ class Model(object):
                 return True
         return False
 
-def build_model(conf, policy_csv, term_csv):
-    raw_model = parse_model(conf)
-    model = Model(raw_model)
-    model.add_policies_from_csv_text(policy_csv)
-    model.add_term_items_from_csv_text(term_csv)
-    return model
-
 global_perm_model = None
+if __name__ != '__main__':
+    from acs_py_enclave import ffi
 
-from acs_py_enclave import ffi
+    @ffi.def_extern()
+    def mesapy_setup_model(conf):
+        global global_perm_model
+        global_perm_model = Model(parse_model(ffi.string(conf)))
+else:
+    test_model = """
+# request definition
+[request_definition]
+r = sub, obj, act
+r2 = sub, obj
+r3 = task, participants
 
-@ffi.def_extern()
-def mesapy_setup_model(conf):
+[policy_definition]
+p = sub, obj, act
+
+[term_definition]
+g = sub, grp
+c = task, usr
+
+[policy_effect]
+allow-and-deny
+
+[matchers]
+r = (r.sub == p.sub and r.obj == p.obj and r.act == p.act) or (g(r.sub, 'admin') and not g(r.sub, 'blklist'))
+r2 = r2.sub == r2.obj.Owner
+r3 = all(usr in r3.participants for usr, in c(r3.task, _))
+"""
     policy_csv = """
 p, alice, file1, read
 p, bob, file1, read
@@ -628,42 +651,41 @@ c, task1, usr1
 c, task1, usr2
 c, task1, usr3
 """
-    global global_perm_model
-    global_perm_model = build_model(ffi.string(conf), policy_csv, term_csv)
+    raw_model = parse_model(test_model)
+    model = Model(raw_model)
+    model.add_policies_from_csv_text(policy_csv)
+    model.add_term_items_from_csv_text(term_csv)
 
-@ffi.def_extern()
-def mesapy_run_tests():
-    model = global_perm_model
     assert model.enforce('r', ['alice', 'file1', 'read']) == True
     assert model.enforce('r', ['alice', 'file1', 'write']) == False
     assert model.enforce('r', ['alice', 'file2', 'read']) == False
     assert model.enforce('r', ['alice', 'file2', 'write']) == True
-
+  
     assert model.enforce('r', ['bob', 'file1', 'read']) == True
     assert model.enforce('r', ['bob', 'file1', 'write']) == True
     assert model.enforce('r', ['bob', 'file2', 'read']) == False
     assert model.enforce('r', ['bob', 'file2', 'write']) == False
-
+  
     assert model.enforce('r', ['charlie', 'file1', 'read']) == True
     assert model.enforce('r', ['charlie', 'file1', 'write']) == True
     assert model.enforce('r', ['charlie', 'file2', 'read']) == True
     assert model.enforce('r', ['charlie', 'file2', 'write']) == True
-
+  
     assert model.enforce('r', ['david', 'file1', 'read']) == False
     assert model.enforce('r', ['david', 'file1', 'write']) == False
     assert model.enforce('r', ['david', 'file2', 'read']) == False
     assert model.enforce('r', ['david', 'file2', 'write']) == False
-
+  
     class ABACObj(object):
         def __init__(self, name, owner):
             self.Name = name
             self.Owner = owner
             
     r2obj = ABACObj('alicedata', 'alice')
-
+  
     assert model.enforce('r2', ['charlie', r2obj]) == False
     assert model.enforce('r2', ['alice', r2obj]) == True
-
+  
     assert model.enforce('r3', ['task1', ['usr1', 'usr2', 'usr3']]) == True
     assert model.enforce('r3', ['task1', ['usr1', 'usr3']]) == False
     assert model.enforce('r3', ['task1', ['usr1', 'usr2']]) == False

@@ -37,7 +37,6 @@ register_ecall_handler!(
 
 extern "C" {
     fn mesapy_setup_model(model_text: *const c_char);
-    fn mesapy_run_tests();
 }
 
 #[handle_ecall]
@@ -88,7 +87,6 @@ fn handle_init_enclave(_args: &InitEnclaveInput) -> Result<InitEnclaveOutput> {
 
     unsafe {
         mesapy_setup_model(CString::new(MODEL_TEXT).unwrap().as_ptr());
-        mesapy_run_tests();
     }
 
     Ok(InitEnclaveOutput::default())
