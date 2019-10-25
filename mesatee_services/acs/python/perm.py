@@ -457,7 +457,7 @@ class Policy(object):
             setattr(self, attr, val)
 
     def __repr__(self):
-        parts = ['\Policy {\n']
+        parts = ['Policy {\n']
         for attr in self.__named_attrs:
             parts.append('  ')
             parts.append(attr)
@@ -468,10 +468,10 @@ class Policy(object):
         return ''.join(parts)
 
 class Term(object):
-    def __init__(self, arity, facts = []):
+    WILDCARD = object()
+    def __init__(self, arity):
         self.__arity = arity
         self.__facts = []
-        self.add_facts(facts)
 
     def add_facts(self, facts):
         for fact in facts:
@@ -485,14 +485,34 @@ class Term(object):
 
     def __call__(self, *args):
         assert len(args) == self.__arity
-        return any(all(a == b for a, b in zip(fact, args)) for fact in self.__facts)
+        # When all arguments are concrete, calling a term just returns boolean results
+        # indicating whether the called tuple is part of the known facts
+        if not any(arg is Term.WILDCARD for arg in args):
+            return any(all(a == b for a, b in zip(fact, args)) for fact in self.__facts)
+        # If arguments contain one or more wildcards, calling a term is more like a
+        # query. The call returns a generator that iterates all facts that match with
+        # the pattern described by the arguments
+        def gen():
+            for fact in self.__facts:
+                rns = []
+                matched = True
+                for a, b in zip(fact, args):
+                    if b is Term.WILDCARD:
+                        rns.append(a)
+                    else:
+                        if a != b:
+                            matched = False
+                            break
+                if matched:
+                    yield rns
+        return gen()
 
 class Model(object):
     def __init__(self, raw_model):
         request_def, policy_def, term_def, effect, matchers = raw_model
         self.__request_template = { r[0]:r[1] for r in request_def }
         self.__policy_template = { p[0]:p[1] for p in policy_def }
-        self.__term_template = { t[0]:len(t[1]) for t in term_def }
+        self.__term_template = { t[0]:t[1] for t in term_def }
         self.__effect = effect
         self.__matchers = { m[0]:m[1] for m in matchers }
 
@@ -522,7 +542,7 @@ class Model(object):
             policy_name:set() for policy_name in self.__policy_template.keys()
         }
         self.__term_knowledge_base = {
-            term_name:Term(term_arity) for term_name, term_arity in self.__term_template.items()
+            term_name:Term(len(term_tpl)) for term_name, term_tpl in self.__term_template.items()
         }
 
     def add_policies(self, policies):
@@ -547,13 +567,10 @@ class Model(object):
 
     def get_matcher_proxy(self, request_type, env):
         def matcher_proxy():
-            for k, v in env.items():
-                locals()[k] = v
-            return eval(self.__matchers[request_type])
+            return eval(self.__matchers[request_type], env)
         return matcher_proxy
 
-    def enforce(self, request):
-        request_type, request_content = request
+    def enforce(self, request_type, request_content):
         tpl = self.__request_template[request_type]
         request_policy = Policy(tpl, request_content)
 
@@ -571,8 +588,13 @@ class Model(object):
                     for d in decisions(remaining_policy_keys, env):
                         yield d
 
-        enforcer_env = {request_type: request_policy}
+        enforcer_env = {
+            request_type: request_policy,
+            'true': True, 'false': False, 'null': None,
+            '_': Term.WILDCARD
+        }
         enforcer_env.update(self.__term_knowledge_base)
+
         for decision in decisions(self.__policy_knowledge_base.keys(), enforcer_env):
             if decision is True:
                 return True
@@ -599,6 +621,12 @@ p, bob, file1, write
 """
     term_csv = """
 g, charlie, admin
+g, david, admin
+g, david, blklist
+
+c, task1, usr1
+c, task1, usr2
+c, task1, usr3
 """
     global global_perm_model
     global_perm_model = build_model(ffi.string(conf), policy_csv, term_csv)
@@ -606,34 +634,40 @@ g, charlie, admin
 @ffi.def_extern()
 def mesapy_run_tests():
     model = global_perm_model
-    assert model.enforce(['r', ['alice', 'file1', 'read']]) == True
-    assert model.enforce(['r', ['alice', 'file1', 'write']]) == False
-    assert model.enforce(['r', ['alice', 'file2', 'read']]) == False
-    assert model.enforce(['r', ['alice', 'file2', 'write']]) == True
+    assert model.enforce('r', ['alice', 'file1', 'read']) == True
+    assert model.enforce('r', ['alice', 'file1', 'write']) == False
+    assert model.enforce('r', ['alice', 'file2', 'read']) == False
+    assert model.enforce('r', ['alice', 'file2', 'write']) == True
 
-    assert model.enforce(['r', ['bob', 'file1', 'read']]) == True
-    assert model.enforce(['r', ['bob', 'file1', 'write']]) == True
-    assert model.enforce(['r', ['bob', 'file2', 'read']]) == False
-    assert model.enforce(['r', ['bob', 'file2', 'write']]) == False
+    assert model.enforce('r', ['bob', 'file1', 'read']) == True
+    assert model.enforce('r', ['bob', 'file1', 'write']) == True
+    assert model.enforce('r', ['bob', 'file2', 'read']) == False
+    assert model.enforce('r', ['bob', 'file2', 'write']) == False
 
-    assert model.enforce(['r', ['charlie', 'file1', 'read']]) == True
-    assert model.enforce(['r', ['charlie', 'file1', 'write']]) == True
-    assert model.enforce(['r', ['charlie', 'file2', 'read']]) == True
-    assert model.enforce(['r', ['charlie', 'file2', 'write']]) == True
+    assert model.enforce('r', ['charlie', 'file1', 'read']) == True
+    assert model.enforce('r', ['charlie', 'file1', 'write']) == True
+    assert model.enforce('r', ['charlie', 'file2', 'read']) == True
+    assert model.enforce('r', ['charlie', 'file2', 'write']) == True
 
-    assert model.enforce(['r', ['david', 'file1', 'read']]) == False
-    assert model.enforce(['r', ['david', 'file1', 'write']]) == False
-    assert model.enforce(['r', ['david', 'file2', 'read']]) == False
-    assert model.enforce(['r', ['david', 'file2', 'write']]) == False
+    assert model.enforce('r', ['david', 'file1', 'read']) == False
+    assert model.enforce('r', ['david', 'file1', 'write']) == False
+    assert model.enforce('r', ['david', 'file2', 'read']) == False
+    assert model.enforce('r', ['david', 'file2', 'write']) == False
 
     class ABACObj(object):
         def __init__(self, name, owner):
             self.Name = name
             self.Owner = owner
             
-    alicedata = ABACObj('alicedata', 'alice')
+    r2obj = ABACObj('alicedata', 'alice')
 
-    assert model.enforce(['r2', ['charlie', alicedata]]) == False
-    assert model.enforce(['r2', ['alice', alicedata]]) == True
+    assert model.enforce('r2', ['charlie', r2obj]) == False
+    assert model.enforce('r2', ['alice', r2obj]) == True
 
+    assert model.enforce('r3', ['task1', ['usr1', 'usr2', 'usr3']]) == True
+    assert model.enforce('r3', ['task1', ['usr1', 'usr3']]) == False
+    assert model.enforce('r3', ['task1', ['usr1', 'usr2']]) == False
+    assert model.enforce('r3', ['task1', ['usr1']]) == False
+    assert model.enforce('r3', ['task1', []]) == False
+    
     print 'all access control checks correct!'
