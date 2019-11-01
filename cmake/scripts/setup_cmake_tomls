@@ -19,6 +19,7 @@ sym_folders = [
 'mesatee_services',
 'toolchain_deps',
 'auditors',
+'service_proposal',
 #'docs',
 ]
 
