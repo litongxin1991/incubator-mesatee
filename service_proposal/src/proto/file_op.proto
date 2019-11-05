@@ -1,0 +1,12 @@
+syntax = "proto2";
+package file_op;
+import "kms.proto";
+message PrepareFileRequest {
+  required EncType encryption_type = 1;
+  required string bucket_id = 2;
+}
+message PrepareFileResponse {
+  required EncType encryption_type = 1;
+}
+
+

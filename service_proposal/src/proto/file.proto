@@ -1,0 +1,42 @@
+syntax = "proto2";
+package file;
+
+message FileMeta {
+  required string hash = 1;
+  required string plaintext_hash = 2; 
+  required uint32 size = 3;
+  required uint32 plaintxt_size = 4;
+}
+
+message MesaTeeFile {
+  required FileMeta meta = 1;
+  required string owner = 2;
+  required string key_id = 3;
+  required BucketInfo access = 4;
+  required string description = 5;
+}
+
+message S3Bucket {
+  required string access_id = 1;
+  required string access_token = 2;
+}
+message NFSBucket {
+  required string server = 1;
+  required string root_dir = 2;
+}
+message LocalBucket {
+  required string rood_dir = 1;
+} 
+
+message BucketInfo {
+  oneof Info {
+    S3Bucket S3 = 1;
+    LocalBucket Local = 2;
+    NFSBucket Nfs = 3;
+  }
+}
+
+message PhysicalAccessInfo {
+  optional string path = 1;
+  required string bucket_id = 2;
+}

@@ -1,0 +1,22 @@
+[package]
+name = "service_proposal"
+version = "0.1.0"
+authors = ["MesaTEE Authors <developers@mesatee.org>"]
+license = "Apache-2.0"
+edition = "2018"
+
+
+[dependencies]
+prost = "*"
+prost-types = "*"
+bytes = "*"
+serde_derive = { version = "1.0.92" }
+serde        = { version = "1.0.92" }
+mesatee_core    = { version = "0.1.0" }
+lazy_static          = { version = "1.0.2", features = ["spin_no_std"] }
+rand         = { version = "0.7.0" }
+uuid            = { version = "0.7.4", features = ["v4"] }
+
+[build-dependencies]
+prost-build         = { version = "0.5.0" }
+env_logger          = { version = "0.6.1" }
