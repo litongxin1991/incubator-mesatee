@@ -18,10 +18,15 @@ fn main() {
     let _ = env_logger::init();
 
     let src = PathBuf::from("src/proto");
-    
+
     let includes = &[src.clone()];
     let mut config = prost_build::Config::new();
     config.out_dir(src.clone());
-    config.type_attribute(".", "#[derive(serde_derive::Serialize, serde_derive::Deserialize)]");
-    config.compile_protos(&[src.join("kms.proto")], includes).unwrap();
+    config.type_attribute(
+        ".",
+        "#[derive(serde_derive::Serialize, serde_derive::Deserialize)]",
+    );
+    config
+        .compile_protos(&[src.join("kms.proto")], includes)
+        .unwrap();
 }

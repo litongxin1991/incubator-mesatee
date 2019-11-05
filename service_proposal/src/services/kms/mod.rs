@@ -1,13 +1,13 @@
-use mesatee_core::db::Memdb;
-use lazy_static::lazy_static;
 use crate::proto::kms_proto;
+use lazy_static::lazy_static;
+use mesatee_core::db::Memdb;
 use mesatee_core::{Error, ErrorKind, Result};
 use uuid::Uuid;
 #[derive(Clone)]
 pub struct AEADKeyConfig {
-    pub key: [u8;32],
-    pub nonce: [u8;12],
-    pub ad: [u8;5],
+    pub key: [u8; 32],
+    pub nonce: [u8; 12],
+    pub ad: [u8; 5],
 }
 
 impl AEADKeyConfig {
@@ -37,7 +37,7 @@ pub fn new_sgxfs_key() -> [u8; 16] {
 #[derive(Clone)]
 pub enum KeyConfig {
     AEAD(AEADKeyConfig),
-    SGXFS([u8;16]),
+    SGXFS([u8; 16]),
 }
 impl From<AEADKeyConfig> for kms_proto::AeadConfig {
     fn from(config: AEADKeyConfig) -> Self {
@@ -52,20 +52,17 @@ impl From<KeyConfig> for kms_proto::KeyConfig {
     fn from(config: KeyConfig) -> Self {
         let key_config = match config {
             KeyConfig::AEAD(config) => kms_proto::key_config::Config::Aead(config.into()),
-            KeyConfig::SGXFS(key) => kms_proto::key_config::Config::Sgxfs(key.to_vec()) 
+            KeyConfig::SGXFS(key) => kms_proto::key_config::Config::Sgxfs(key.to_vec()),
         };
         kms_proto::KeyConfig {
-            config: Some(key_config)
+            config: Some(key_config),
         }
     }
 }
 
-
-
 lazy_static! {
-    pub static ref KEY_STORE: Memdb<String, KeyConfig> = {
-        Memdb::<String, KeyConfig>::open().expect("cannot open db")
-    };
+    pub static ref KEY_STORE: Memdb<String, KeyConfig> =
+        { Memdb::<String, KeyConfig>::open().expect("cannot open db") };
 }
 
 #[derive(Clone, serde_derive::Serialize, serde_derive::Deserialize, Debug)]
@@ -100,7 +97,7 @@ pub fn del_key(req: kms_proto::DeleteKeyRequest) -> Result<kms_proto::DeleteKeyR
         .ok_or_else(|| Error::from(ErrorKind::MissingValue))?;
 
     Ok(kms_proto::DeleteKeyResponse {
-        config: Some(key_config.into())
+        config: Some(key_config.into()),
     })
 }
 

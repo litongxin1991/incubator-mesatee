@@ -3,7 +3,7 @@ use mesatee_core::db::Memdb;
 use lazy_static::lazy_static;
 use std::collections::HashSet;
 
-// File 
+// File
 #[derive(Clone)]
 struct FileMeta {
     hash: String,
@@ -70,5 +70,3 @@ lazy_static! {
     };
 }
 */
-
-
