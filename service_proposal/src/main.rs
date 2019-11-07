@@ -14,10 +14,15 @@
 
 mod proto;
 mod services;
-use proto::kms_proto::EncType;
+use proto::kms_proto::{self, KMSService};
+use crate::services::kms;
 fn main() {
-    let enc: i32 = 0;
-    let enc_type: EncType = EncType::Aead;
-    assert_eq!(enc, enc_type as i32);
-    println!("Hello, world!");
+    let service = kms::KMSEnclave;
+    let request = kms_proto::KMSRequest::CreateKey(kms_proto::CreateKeyRequest {
+        enc_type: kms_proto::EncType::Aead as i32,
+    });
+    println!("{:?}", request);
+    let response = service.handle_invoke(request);
+    println!("{:?}", response);
+
 }

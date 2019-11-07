@@ -42,3 +42,9 @@ message DeleteKeyRequest {
 message DeleteKeyResponse {
   KeyConfig config = 1;
 }
+
+service KMS {
+  rpc GetKey(GetKeyRequest) returns (GetKeyResponse);
+  rpc DelKey(DeleteKeyRequest) returns (DeleteKeyResponse);
+  rpc CreateKey(CreateKeyRequest) returns (CreateKeyResponse);
+}

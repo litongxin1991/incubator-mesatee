@@ -1,2 +1,2 @@
-mod kms;
+pub mod kms;
 mod tdfs;

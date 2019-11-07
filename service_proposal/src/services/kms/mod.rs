@@ -65,64 +65,46 @@ lazy_static! {
         { Memdb::<String, KeyConfig>::open().expect("cannot open db") };
 }
 
-#[derive(Clone, serde_derive::Serialize, serde_derive::Deserialize, Debug)]
-#[serde(tag = "type")]
-pub enum KMSRequest {
-    Create(kms_proto::CreateKeyRequest),
-    Get(kms_proto::GetKeyRequest),
-    Delete(kms_proto::DeleteKeyRequest),
-}
 
-#[derive(Clone, serde_derive::Serialize, serde_derive::Deserialize, Debug)]
-#[serde(tag = "type")]
-pub enum KMSResponse {
-    Create(kms_proto::CreateKeyResponse),
-    Get(kms_proto::GetKeyResponse),
-    Delete(kms_proto::DeleteKeyResponse),
-}
 
-pub fn get_key(req: kms_proto::GetKeyRequest) -> Result<kms_proto::GetKeyResponse> {
-    let key_config = KEY_STORE
-        .get(&req.key_id)?
-        .ok_or_else(|| Error::from(ErrorKind::MissingValue))?;
+pub struct KMSEnclave;
+impl kms_proto::KMSService for KMSEnclave {
+    fn get_key(req: kms_proto::GetKeyRequest) -> Result<kms_proto::GetKeyResponse> {
+        let key_config = KEY_STORE
+            .get(&req.key_id)?
+            .ok_or_else(|| Error::from(ErrorKind::MissingValue))?;
 
-    Ok(kms_proto::GetKeyResponse {
-        config: Some(key_config.into()),
-    })
-}
-
-pub fn del_key(req: kms_proto::DeleteKeyRequest) -> Result<kms_proto::DeleteKeyResponse> {
-    let key_config = KEY_STORE
-        .del(&req.key_id)?
-        .ok_or_else(|| Error::from(ErrorKind::MissingValue))?;
-
-    Ok(kms_proto::DeleteKeyResponse {
-        config: Some(key_config.into()),
-    })
-}
-
-pub fn create_key(req: kms_proto::CreateKeyRequest) -> Result<kms_proto::CreateKeyResponse> {
-    let config = match kms_proto::EncType::from_i32(req.enc_type) {
-        Some(kms_proto::EncType::Aead) => KeyConfig::AEAD(AEADKeyConfig::new()),
-        Some(kms_proto::EncType::Sgxfs) => KeyConfig::SGXFS(new_sgxfs_key()),
-        None => return Err(Error::from(ErrorKind::InvalidInputError)),
-    };
-
-    let key_id = Uuid::new_v4().to_string();
-    if KEY_STORE.get(&key_id)?.is_some() {
-        return Err(Error::from(ErrorKind::UUIDError));
+        Ok(kms_proto::GetKeyResponse {
+            config: Some(key_config.into()),
+        })
     }
-    KEY_STORE.set(&key_id, &config)?;
-    Ok(kms_proto::CreateKeyResponse {
-        key_id,
-        config: Some(config.into()),
-    })
-}
 
-pub fn handle_invoke(req: KMSRequest) -> Result<KMSResponse> {
-    match req {
-        KMSRequest::Create(req) => create_key(req).map(KMSResponse::Create),
-        KMSRequest::Get(req) => get_key(req).map(KMSResponse::Get),
-        KMSRequest::Delete(req) => del_key(req).map(KMSResponse::Delete),
+    fn del_key(req: kms_proto::DeleteKeyRequest) -> Result<kms_proto::DeleteKeyResponse> {
+        let key_config = KEY_STORE
+            .del(&req.key_id)?
+            .ok_or_else(|| Error::from(ErrorKind::MissingValue))?;
+
+        Ok(kms_proto::DeleteKeyResponse {
+            config: Some(key_config.into()),
+        })
+    }
+
+
+    fn create_key(req: kms_proto::CreateKeyRequest) -> Result<kms_proto::CreateKeyResponse> {
+        let config = match kms_proto::EncType::from_i32(req.enc_type) {
+            Some(kms_proto::EncType::Aead) => KeyConfig::AEAD(AEADKeyConfig::new()),
+            Some(kms_proto::EncType::Sgxfs) => KeyConfig::SGXFS(new_sgxfs_key()),
+            None => return Err(Error::from(ErrorKind::InvalidInputError)),
+        };
+
+        let key_id = Uuid::new_v4().to_string();
+        if KEY_STORE.get(&key_id)?.is_some() {
+            return Err(Error::from(ErrorKind::UUIDError));
+        }
+        KEY_STORE.set(&key_id, &config)?;
+        Ok(kms_proto::CreateKeyResponse {
+            key_id,
+            config: Some(config.into()),
+        })
     }
 }
