@@ -14,8 +14,8 @@
 
 mod proto;
 mod services;
-use proto::kms_proto::{self, KMSService};
 use crate::services::kms;
+use proto::kms_proto::{self, KMSService};
 fn main() {
     let service = kms::KMSEnclave;
     let request = kms_proto::KMSRequest::CreateKey(kms_proto::CreateKeyRequest {
@@ -24,5 +24,4 @@ fn main() {
     println!("{:?}", request);
     let response = service.handle_invoke(request);
     println!("{:?}", response);
-
 }

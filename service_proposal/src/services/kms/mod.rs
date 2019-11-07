@@ -65,8 +65,6 @@ lazy_static! {
         { Memdb::<String, KeyConfig>::open().expect("cannot open db") };
 }
 
-
-
 pub struct KMSEnclave;
 impl kms_proto::KMSService for KMSEnclave {
     fn get_key(req: kms_proto::GetKeyRequest) -> Result<kms_proto::GetKeyResponse> {
@@ -88,7 +86,6 @@ impl kms_proto::KMSService for KMSEnclave {
             config: Some(key_config.into()),
         })
     }
-
 
     fn create_key(req: kms_proto::CreateKeyRequest) -> Result<kms_proto::CreateKeyResponse> {
         let config = match kms_proto::EncType::from_i32(req.enc_type) {

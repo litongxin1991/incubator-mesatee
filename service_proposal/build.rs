@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::path::PathBuf;
 use prost_build;
+use std::path::PathBuf;
 
 #[derive(Debug)]
 pub struct MesaTEEServiceGenerator;
@@ -24,33 +24,52 @@ impl prost_build::ServiceGenerator for MesaTEEServiceGenerator {
         let response_name = format!("{}{}", &service.proto_name, "Response");
         let service_name = format!("{}{}", &service.proto_name, "Service");
         // Generate request enum structure
-        buf.push_str("#[derive(Clone, serde_derive::Serialize, serde_derive::Deserialize, Debug)]\n");
+        buf.push_str(
+            "#[derive(Clone, serde_derive::Serialize, serde_derive::Deserialize, Debug)]\n",
+        );
         buf.push_str("#[serde(tag = \"type\")]\n");
         buf.push_str(&format!("pub enum {} {{\n", &request_name));
         for method in &service.methods {
-            buf.push_str(&format!("    {}({}),\n", method.proto_name, method.input_type));
+            buf.push_str(&format!(
+                "    {}({}),\n",
+                method.proto_name, method.input_type
+            ));
         }
         buf.push_str(&format!("}}\n"));
 
         // Generate response enum structure
-        buf.push_str("#[derive(Clone, serde_derive::Serialize, serde_derive::Deserialize, Debug)]\n");
+        buf.push_str(
+            "#[derive(Clone, serde_derive::Serialize, serde_derive::Deserialize, Debug)]\n",
+        );
         buf.push_str("#[serde(tag = \"type\")]\n");
         buf.push_str(&format!("pub enum {} {{\n", &response_name));
         for method in &service.methods {
-            buf.push_str(&format!("    {}({}),\n", method.proto_name, method.output_type));
+            buf.push_str(&format!(
+                "    {}({}),\n",
+                method.proto_name, method.output_type
+            ));
         }
         buf.push_str(&format!("}}\n"));
 
         // Genreate trait
         buf.push_str(&format!("pub trait {} {{\n", &service_name));
         for method in &service.methods {
-            buf.push_str(&format!("    fn {}(req: {}) -> mesatee_core::Result<{}>;\n", method.name, method.input_type, method.output_type));
+            buf.push_str(&format!(
+                "    fn {}(req: {}) -> mesatee_core::Result<{}>;\n",
+                method.name, method.input_type, method.output_type
+            ));
         }
         // Generate handle_invoke
-        buf.push_str(&format!("    fn handle_invoke(&self, req: {}) -> mesatee_core::Result<{}> {{\n", &request_name, &response_name));
+        buf.push_str(&format!(
+            "    fn handle_invoke(&self, req: {}) -> mesatee_core::Result<{}> {{\n",
+            &request_name, &response_name
+        ));
         buf.push_str("        match req {\n");
         for method in &service.methods {
-            buf.push_str(&format!("            {}::{}(req) => Self::{}(req).map({}::{}),\n", &request_name, &method.proto_name, method.name, &response_name, &method.proto_name));
+            buf.push_str(&format!(
+                "            {}::{}(req) => Self::{}(req).map({}::{}),\n",
+                &request_name, &method.proto_name, method.name, &response_name, &method.proto_name
+            ));
         }
         buf.push_str("        }\n");
         buf.push_str("    }\n");
