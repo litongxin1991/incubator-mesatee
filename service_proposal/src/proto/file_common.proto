@@ -1,0 +1,22 @@
+syntax = "proto2";
+package file_common_proto;
+
+message S3Bucket {
+    required string access_id = 1;
+    required string access_token = 2;
+}
+message NFSBucket {
+    required string server = 1;
+    required string root_dir = 2;
+}
+message LocalBucket {
+    required string root_dir = 1;
+}
+
+message BucketInfo {
+    oneof info {
+        S3Bucket S3 = 1;
+        NFSBucket NFS = 2;
+        LocalBucket Local = 3;
+    }
+}

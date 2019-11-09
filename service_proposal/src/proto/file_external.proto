@@ -1,0 +1,23 @@
+syntax = "proto2";
+import "credential.proto";
+import "file_common.proto";
+package mesatee_file;
+
+
+
+message UploadBucketRequest {
+    // the name must be creds
+    required credential_proto.Credential creds = 1; 
+    required file_common_proto.BucketInfo bucket = 2;
+    required string description = 3;
+    
+}
+message UploadBucketResponse {
+    required string bucket_id = 1;
+}
+
+
+//@need_authentication
+service FileExternal {
+  rpc UploadBucket(UploadBucketRequest) returns (UploadBucketResponse);
+}

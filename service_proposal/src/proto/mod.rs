@@ -13,4 +13,6 @@
 // limitations under the License.
 
 pub mod kms_proto;
+pub mod credential_proto;
+pub mod file_common_proto;
 //mod file_op_proto;

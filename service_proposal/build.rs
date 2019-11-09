@@ -64,6 +64,33 @@ impl prost_build::ServiceGenerator for MesaTEEServiceGenerator {
             "    fn handle_invoke(&self, req: {}) -> mesatee_core::Result<{}> {{\n",
             &request_name, &response_name
         ));
+
+        // authentication
+        let mut need_authentication: bool = false;
+        for comment in service.comments.leading.iter() {
+            if comment.contains("@need_authentication") {
+                need_authentication = true;
+            }
+        }
+        if need_authentication {
+            buf.push_str("        let authenticated = match req {\n");
+            for method in &service.methods {
+                buf.push_str(&format!(
+                    "            {}::{}(ref req) => req.creds.auth(),\n",
+                    &request_name, &method.proto_name
+                ));
+            }
+            buf.push_str("        };\n");
+            buf.push_str(
+r#"
+        if !authenticated {
+            return Err(mesatee_core::Error::from(mesatee_core::ErrorKind::PermissionDenied));
+        }
+"#
+            )
+        }
+
+        // dispatch request
         buf.push_str("        match req {\n");
         for method in &service.methods {
             buf.push_str(&format!(
@@ -92,5 +119,14 @@ fn main() {
     );
     config
         .compile_protos(&[src.join("kms.proto")], includes)
+        .unwrap();
+    config
+        .compile_protos(&[src.join("credential.proto")], includes)
+        .unwrap();
+    config
+        .compile_protos(&[src.join("file_common.proto")], includes)
+        .unwrap();
+    config
+        .compile_protos(&[src.join("file_external.proto")], includes)
         .unwrap();
 }
